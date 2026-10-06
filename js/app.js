@@ -2,7 +2,7 @@
 // offline viewer and the live reader share one code path.
 
 import { fromHex, toHex } from './bytes.js';
-import { BYTE_LABELS_PT, CHECKSUMS, COUNTS_PER_MAH, FAILURE_SEVERITY_PT, LOCK_CAUSES_PT, READ_TITLES_PT, READS, TEMP_LABELS_PT, TESTMODE } from './catalog.js';
+import { BYTE_LABELS_PT, CHECKSUMS, CHIP_LABELS_PT, COUNTS_PER_MAH, FAILURE_SEVERITY_PT, LOCK_CAUSES_PT, READ_TITLES_PT, READS, TEMP_LABELS_PT, TESTMODE } from './catalog.js';
 import { btc04ChargeBars, btc04HealthScore, buildReport, decodeStoredRead } from './decode.js';
 import { diagnose, unlockRefusal } from './diagnosis.js';
 import { CXT_ADC, CXT_CALIBRATION_MV, CXT_CHANNELS, CXT_NTC, CXT_STEP_NAME } from './cxt-catalog.js';
@@ -223,7 +223,7 @@ const FIELD_LABELS_PT = {
   status: 'situação da leitura', error: 'erro', blank: 'linha vazia',
   rom: 'ROM', serial: 'número de série', chip: 'chip', manufacture_date: 'data de fabricação',
   capacity_code: 'código de capacidade', capacity_ah: 'capacidade (Ah)', charge_count: 'contador de cargas',
-  second_counter: 'segundo contador', failure_code: 'código de falha', locked: 'travada (código de falha)',
+  second_counter: 'segundo contador', failure_code: 'código de falha', locked: 'travada (código de falha ou checksums)',
   failure_severity: 'gravidade do código de falha', flags: 'flags', cell_count: 'células (pelas flags)',
   charge_counter_raw: 'contador coulomb (bruto)', remaining_mah: 'carga restante (mAh)',
   charger_lock_nybble: 'nybble 34 (trava de carregador)', lock_causes: 'causas da trava', model_code: 'código do modelo',
@@ -412,10 +412,10 @@ function renderPlate(report, diagnosis, dump) {
   const rating = [msg ? `${formatNumber(msg.capacity_ah, 1)} Ah` : null, voltageClass(report, diagnosis)].filter(Boolean).join(' / ');
   const locked = msg ? msg.lock_causes.length > 0 : null;
   const facts = [
-    ['Fabricação', msg ? formatDate(msg.manufacture_date) : '—'],
+    ['Fabricação', msg?.manufacture_date ? formatDate(msg.manufacture_date) : '—'],
     ['Número de série', msg ? msg.serial : '—', 'hex'],
     ['Cargas', msg ? String(msg.charge_count) : '—'],
-    ['Chip', msg ? (msg.chip === 'f0513' ? 'F0513 (antigo)' : 'LXT') : report.readings?.source === 'f0513' ? 'F0513 (antigo)' : '—'],
+    ['Chip', msg ? (CHIP_LABELS_PT[msg.chip] ?? '—') : report.readings?.source === 'f0513' ? CHIP_LABELS_PT.f0513 : '—'],
     ['ROM', msg ? msg.rom : '—', 'hex'],
     ['Firmware', dump.firmware ?? '—'],
   ];

@@ -49,11 +49,14 @@ export async function probeLine(link) {
   return lineFromProbePayload(outcome.payload);
 }
 
-// spec read_plan "f0513": the f0513_* reads are for F0513 chips (ROM byte 3 < 100) and for packs
-// whose lxt_msg brought no ROM back (failed, short, blank), where the chip is unknown.
+function lxtMsgChip(lxtMsgRead) {
+  return lxtMsgRead?.ok ? chipFromRom(fromHex(lxtMsgRead.response)) : null;
+}
+
+// spec read_plan "f0513" / chip_from_rom: the f0513_* reads are for F0513 and unknown chips and
+// for packs whose lxt_msg brought no ROM back (failed, short, blank).
 function isF0513Candidate(lxtMsgRead) {
-  if (!lxtMsgRead?.ok) return true;
-  return chipFromRom(fromHex(lxtMsgRead.response)) !== 'lxt';
+  return [null, 'f0513', 'unknown'].includes(lxtMsgChip(lxtMsgRead));
 }
 
 // One 0xD1 session with the spec's bulk reads. Each group is stored as its catalog read:
@@ -77,7 +80,7 @@ async function readBulkSession(link) {
 /**
  * "Ler bateria" for LXT, spec read_plan: version, line probe (unless `line` is given, e.g. the
  * detection's own 0xD0 result), one bulk 0xD1 session, lxt_data_ext, and the f0513 reads only on
- * F0513 chips or when lxt_msg didn't answer. Without 0xD1 every read goes as a regular command.
+ * F0513 or unknown chips, or when lxt_msg brought no ROM back. Without 0xD1 every read goes as a regular command.
  * Reads come back in plan order (session reads, lxt_data_ext, f0513_*), like python/ records them.
  * @param {(progress: {done: number, total: number, name: string, label_pt: string}) => void} onProgress
  * @param {{line?: {idle_level: number, presence: number|null}|null}} options
@@ -111,8 +114,8 @@ export async function readBattery(link, onProgress = () => {}, { line } = {}) {
 }
 
 // Fallback for firmware without 0xD1 (e.g. the original OBI's): the same reads as regular
-// commands, lxt_msg first. Memory reads are left out on F0513 candidates (each regular command
-// costs ~0.4 s and they mean nothing there) and the f0513_* reads on LXT chips.
+// commands, lxt_msg first. Memory reads only go to LXT chips (each regular command costs ~0.4 s
+// and they mean nothing elsewhere), the f0513_* reads only to F0513 candidates.
 async function readPerCommand(link, onProgress) {
   const [lxtMsg, ...sessionRest] = READ_PLAN.session.map(findRead);
   const progress = (index, total, read) => onProgress({
@@ -122,10 +125,8 @@ async function readPerCommand(link, onProgress) {
   const planned = [...sessionRest, ...READ_PLAN.after_session.map(findRead)];
   progress(0, 1 + planned.length, lxtMsg);
   const reads = [await runCatalogRead(link, lxtMsg)];
-  const f0513 = isF0513Candidate(reads[0]);
-  const rest = f0513
-    ? [...planned.filter((read) => read.group !== 'memory'), ...readsInGroups(READ_PLAN.f0513_group)]
-    : planned;
+  const memory = lxtMsgChip(reads[0]) === 'lxt' ? planned : planned.filter((read) => read.group !== 'memory');
+  const rest = isF0513Candidate(reads[0]) ? [...memory, ...readsInGroups(READ_PLAN.f0513_group)] : memory;
   for (const [index, read] of rest.entries()) {
     progress(index + 1, 1 + rest.length, read);
     reads.push(await runCatalogRead(link, read));

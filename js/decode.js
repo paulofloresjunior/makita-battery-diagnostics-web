@@ -2,7 +2,7 @@
 // so old dumps benefit from decoder fixes (spec: dump_format.note).
 
 import { blankKind, fromHex, nibbleSwap, round, toHex, u16le, u32le } from './bytes.js';
-import { ACK, CHECKSUMS, COUNTS_PER_MAH, FAILURE_CODE_WARNING, MSG_FLAGS, MSG_LEN, MSG_OFFSET, NYBBLE, TESTMODE } from './catalog.js';
+import { ACK, CHECKSUMS, CHIP_ROM_BYTE3, COUNTS_PER_MAH, CS2_WITHOUT_CODE, FAILURE_CODE_WARNING, MSG_FLAGS, MSG_LEN, MSG_OFFSET, NYBBLE, TESTMODE } from './catalog.js';
 import { baseReadName, catalogEntryFor } from './protocol.js';
 import { isCxtReadName } from './cxt-catalog.js';
 import { calibrationVccMv, decodeCxtPayload } from './cxt-decode.js';
@@ -19,14 +19,23 @@ const BTC04_HEALTH_FULL_RATIO = 80;
 const BTC04_HEALTH_OFFSET = 5;
 const BTC04_HEALTH_MAX = 4;
 const LXT_DATA_EXTENDED = 0x69;
-// ROM byte 3 is 0x64 (100) on every LXT-chip pack and 0x02 on the F0513 one; synrais picks
-// the protocol by "byte 3 < 100 -> F0513".
-const F0513_ROM_BYTE3_LIMIT = 100;
+// Causes that mean the BMS itself locked the pack, whatever the failure code says.
+const BMS_LOCK_CAUSES = new Set(['inverted_checksums', 'stale_cs2']);
 
-// 'lxt' or 'f0513' from the 8 ROM bytes; null when there is no ROM (short, or a blank FF/00 line).
+function isCalendarDate(yy, mm, dd) {
+  const date = new Date(Date.UTC(2000 + yy, mm - 1, dd));
+  return date.getUTCFullYear() === 2000 + yy && date.getUTCMonth() === mm - 1 && date.getUTCDate() === dd;
+}
+
+// Command tree the chip answers (spec chip_from_rom): 'lxt', 'f0513', 'mc908', 'legacy' or
+// 'unknown'; null when there is no ROM (short, or a blank FF/00 line).
 export function chipFromRom(rom) {
   if (rom.length < MSG_OFFSET || blankKind(rom.slice(0, MSG_OFFSET))) return null;
-  return rom[3] < F0513_ROM_BYTE3_LIMIT ? 'f0513' : 'lxt';
+  if (rom[3] === CHIP_ROM_BYTE3.LXT) return 'lxt';
+  // MC908 boards keep no manufacture date in the ROM (OBI repo #22, #172).
+  if (!isCalendarDate(rom[0], rom[1], rom[2])) return 'mc908';
+  if (CHIP_ROM_BYTE3.F0513.includes(rom[3])) return 'f0513';
+  return rom[3] >= CHIP_ROM_BYTE3.LEGACY_MIN ? 'legacy' : 'unknown';
 }
 
 function silentOrNull(payload) {
@@ -45,10 +54,15 @@ export function msgNybble(msg, n) {
   return n & 1 ? byte >> 4 : byte & 0x0f;
 }
 
-function checksumCalc(msg, checksum) {
+function nybbleSum(msg, first, last) {
   let sum = 0;
-  for (let n = checksum.first; n <= checksum.last; n++) sum += msgNybble(msg, n);
+  for (let n = first; n <= last; n++) sum += msgNybble(msg, n);
   return sum & 0x0f;
+}
+
+function checksumCalc(msg, checksum) {
+  const withoutCode = checksum.name === 'CS2' && msg[0] === CS2_WITHOUT_CODE.FAMILY;
+  return nybbleSum(msg, checksum.first, withoutCode ? CS2_WITHOUT_CODE.LAST : checksum.last);
 }
 
 function decodeCounter(msg, firstNybble) {
@@ -89,16 +103,26 @@ export function cellCountFromFlags(flags) {
   return flags === MSG_FLAGS.TYPE6 ? 10 : null;
 }
 
-function lockCauses(failureCode, checksums, chargerLock, flags) {
+// CS1 and CS2 inverted, AUX intact; CS0 is inverted too only with failure code F. 41 locked
+// packs from 29 people in the OBI repo issues: 26 of them had CS0 intact (codes 0, 1, 3, 5, 7, one F on family 30).
+function isBmsLock(c) {
+  return c.CS1.inverted && c.CS2.inverted && (c.CS0.ok || c.CS0.inverted) && c.AUX0.ok && c.AUX1.ok;
+}
+
+// Failure code written without updating CS2, which still sums nybbles 32-39 (OBI #16, #166).
+function isStaleCs2(msg, failureCode, c) {
+  const othersOk = Object.entries(c).every(([name, checksum]) => name === 'CS2' || checksum.ok);
+  // Never true on family 30: there CS2's calc already is the 32-39 sum.
+  return failureCode !== 0 && othersOk && !c.CS2.ok && c.CS2.stored === nybbleSum(msg, 32, CS2_WITHOUT_CODE.LAST);
+}
+
+function lockCauses(msg, failureCode, checksums, chargerLock, flags) {
   const causes = [];
   if (failureSeverity(failureCode) === 'travada') causes.push('failure_code');
-  const bad = Object.values(checksums).filter((c) => !c.ok);
-  const primaryCount = CHECKSUMS.filter((c) => c.primary).length;
-  // The BMS lock writes exactly the three primary checksums inverted; anything else is
-  // a plain mismatch (corruption or a partial write).
-  const bmsLock = bad.length === primaryCount && bad.every((c) => c.primary && c.inverted);
-  if (bmsLock) causes.push('inverted_checksums');
-  if (bad.length > 0 && !bmsLock) causes.push('checksum_mismatch');
+  // Anything else that doesn't add up is a plain mismatch (corruption or a hand edit).
+  if (isBmsLock(checksums)) causes.push('inverted_checksums');
+  else if (isStaleCs2(msg, failureCode, checksums)) causes.push('stale_cs2');
+  else if (Object.values(checksums).some((c) => !c.ok)) causes.push('checksum_mismatch');
   // Nybble 34 is the high half of the flags byte: on a type-6 pack (0x1E) it is 1 by design.
   if (chargerLock !== 0 && flags !== MSG_FLAGS.TYPE6) causes.push('charger_lock');
   return causes;
@@ -116,23 +140,27 @@ export function decodeLxtMsg(payload) {
   const checksums = decodeChecksums(msg);
   const flags = nibbleSwap(msg[MSG_FLAGS.BYTE]);
   const severity = failureSeverity(failureCode);
+  const causes = lockCauses(msg, failureCode, checksums, chargerLock, flags);
   return {
     status: 'ok',
     rom: toHex(rom),
     serial: toHex(rom.slice(6, 8)),
-    chip: rom[3] < F0513_ROM_BYTE3_LIMIT ? 'f0513' : 'lxt',
-    manufacture_date: `20${pad2(rom[0])}-${pad2(rom[1])}-${pad2(rom[2])}`,
+    chip: chipFromRom(rom),
+    // MC908 ROMs hold no date (OBI repo #22, #172): null, like python/, not "2032-60-00".
+    manufacture_date: isCalendarDate(rom[0], rom[1], rom[2]) ? `20${pad2(rom[0])}-${pad2(rom[1])}-${pad2(rom[2])}` : null,
     ...decodeCapacity(msg[16]),
     charge_count: decodeCounter(msg, NYBBLE.CHARGE_COUNT),
     second_counter: decodeCounter(msg, NYBBLE.SECOND_COUNTER),
     failure_code: failureCode,
     failure_severity: severity,
-    locked: severity === 'travada',
+    // The checksums can carry a BMS lock even with failure code 0 or 5 (OBI repo issues: the
+    // old OBI UI said UNLOCKED and chargers refused the pack).
+    locked: severity === 'travada' || causes.some((cause) => BMS_LOCK_CAUSES.has(cause)),
     charger_lock_nybble: chargerLock,
     flags,
     cell_count: cellCountFromFlags(flags),
     checksums,
-    lock_causes: lockCauses(failureCode, checksums, chargerLock, flags),
+    lock_causes: causes,
     model_code: msg[19],
     battery_type: nibbleSwap(msg[11]),
     damage_rating: (msgNybble(msg, NYBBLE.DAMAGE_RATING) >> 1) & 0x07,

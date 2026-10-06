@@ -78,12 +78,20 @@ export function spreadFinding(spread, socPct) {
   return [];
 }
 
-export function temperatureFindings(tempsC) {
+// namesNtc: LXT only. The raw 2430 / 3980 signatures of an open / shorted NTC come from LXT packs
+// (OBI repo issues); XGT and CXT keep the generic out-of-range finding.
+export function temperatureFindings(tempsC, { namesNtc = false } = {}) {
   const findings = [];
   const [min, max] = T.temp_plausible_c;
   tempsC.forEach((c, index) => {
-    if (c >= min && c <= max) return;
-    findings.push({ severity: 'warn', code: 'temp_implausible', title: `Sensor de temperatura ${index + 1} fora da faixa`, detail: `Lê ${formatCelsius(c)}; esperado entre ${min} e ${max} °C. Pode ser termistor (NTC) aberto ou em curto.` });
+    const sensor = `Sensor de temperatura ${index + 1}`;
+    if (namesNtc && c <= T.ntc_open_c) {
+      findings.push({ severity: 'warn', code: 'ntc_open', title: `${sensor}: termistor aberto`, detail: `Lê ${formatCelsius(c)}: o termistor (NTC) está aberto ou desconectado. O BMS pode travar a carga por isso.` });
+    } else if (namesNtc && c >= T.ntc_short_c) {
+      findings.push({ severity: 'warn', code: 'ntc_short', title: `${sensor}: termistor em curto`, detail: `Lê ${formatCelsius(c)}: o termistor (NTC) está em curto.` });
+    } else if (c < min || c > max) {
+      findings.push({ severity: 'warn', code: 'temp_implausible', title: `${sensor} fora da faixa`, detail: `Lê ${formatCelsius(c)}; esperado entre ${min} e ${max} °C.` });
+    }
   });
   if (tempsC.length === 2 && Math.abs(tempsC[0] - tempsC[1]) > T.temp_sensor_diverge_c) {
     findings.push({ severity: 'warn', code: 'temp_diverge', title: 'Sensores de temperatura discordam', detail: `Diferença de ${formatNumber(Math.abs(tempsC[0] - tempsC[1]), 1)} °C (limite ${T.temp_sensor_diverge_c} °C).` });
@@ -106,7 +114,31 @@ function messageNotes(msg) {
 function lockFindings(msg) {
   if (!msg || msg.lock_causes.length === 0) return [];
   const causes = msg.lock_causes.map((cause) => LOCK_CAUSES_PT[cause]).join('; ');
-  return [{ severity: 'bad', code: 'locked', title: 'Bateria travada', detail: `${causes}. Carregadores recusam o pack até os erros serem limpos.` }];
+  // OBI repo issues: 10 packs like this; the old OBI UI said UNLOCKED and chargers refused them.
+  const silent = msg.failure_code === 0 && msg.lock_causes.includes('inverted_checksums')
+    ? ' O código de falha é 0, então a interface antiga do OBI mostraria "UNLOCKED", mas o carregador recusa.'
+    : '';
+  return [{ severity: 'bad', code: 'locked', title: 'Bateria travada', detail: `${causes}. Carregadores recusam o pack até os erros serem limpos.${silent}` }];
+}
+
+// The BMS measures the pack after the output fuse/FET (OBI repo #140): far below the cell sum
+// means that path is open, not that the cells are empty. The F0513 pack is the cell sum itself.
+export function outputPathOpen(readings) {
+  if (readings.source === 'f0513') return false;
+  const cellSum = readings.cells_mv.reduce((sum, mv) => sum + mv, 0);
+  return cellSum >= T.open_sense_pack_v * 1000 && readings.pack_mv < cellSum * T.pack_below_cells_ratio;
+}
+
+function implausibleCellFindings(readings) {
+  const findings = [];
+  readings.cells_mv.forEach((mv, index) => {
+    // OBI repo #203: the web UI showed 0.204/0.716 V, i.e. CC 00/CC 02 echoed back.
+    const echo = readings.source === 'f0513' && mv <= T.f0513_echo_max_mv && (mv & 0xff) === T.f0513_echo_low_byte;
+    if (!echo && volts(mv) <= T.cell_implausible_v) return;
+    const reason = echo ? 'eco do comando CC, não uma tensão' : 'impossível para Li-ion';
+    findings.push({ severity: 'warn', code: 'cell_implausible', title: `Célula ${index + 1} com leitura impossível`, detail: `Lê ${formatVolts(volts(mv))}: ${reason}. Leia de novo e não confie nas tensões desta leitura.` });
+  });
+  return findings;
 }
 
 function silenceFinding(report) {
@@ -132,17 +164,26 @@ export function diagnose(report) {
   let cells = [];
   let spread = null;
   const readings = report.readings;
+  const cellCount = report.msg?.cell_count ?? null;
+  const implausible = readings ? implausibleCellFindings(readings) : [];
   if (readings) {
-    const cellCount = report.msg?.cell_count ?? null;
     cells = classifyCells(readings.pack_mv, readings.cells_mv, cellCount);
+    findings.push(...implausible, ...temperatureFindings(readings.temps_c, { namesNtc: true }));
+  }
+  // The voltages aren't real (an echoed command, or beyond Li-ion): judging cells, balance or the
+  // pack from them would invent problems (OBI repo #203 read as "deep discharge").
+  if (readings && implausible.length === 0) {
     spread = cellSpread(cells);
-    findings.push(...cellFindings(cells), ...spreadFinding(spread, readings.soc_pct), ...temperatureFindings(readings.temps_c));
+    findings.push(...cellFindings(cells), ...spreadFinding(spread, readings.soc_pct));
     if (cells.some((cell) => cell.state === 'absent')) {
       const source = cellCount === null ? 'pela tensão da célula 5' : 'pelas flags do BMS';
       findings.push({ severity: 'info', code: 'four_cell', title: 'Pack de 4 células', detail: `A célula 5 não existe (pack de 14,4 V, ${source}); ela fica fora da análise.` });
     }
-    if (volts(readings.pack_mv) < 1) {
-      findings.push({ severity: 'info', code: 'pack_zero', title: 'Pack praticamente em 0 V', detail: 'O chip ainda responde porque é alimentado pela linha de dados; isso não indica que as células estejam boas.' });
+    if (outputPathOpen(readings)) {
+      const cellSum = readings.cells_mv.reduce((sum, mv) => sum + mv, 0);
+      findings.push({ severity: 'bad', code: 'output_path_open', title: 'Saída do pack aberta', detail: `O pack lê ${formatVolts(volts(readings.pack_mv))} com as células somando ${formatVolts(volts(cellSum))}. O BMS mede o pack depois do fusível/MOSFET de saída, então esse caminho está aberto; as células estão boas.` });
+    } else if (volts(readings.pack_mv) < 1) {
+      findings.push({ severity: 'info', code: 'pack_zero', title: 'Pack praticamente em 0 V', detail: 'O chip ainda responde porque é alimentado pelo ENABLE (5 V do carregador ou da ponte), não pelas células; isso não indica que as células estejam boas.' });
     }
   }
   const hasProblem = findings.some((f) => f.severity === 'warn' || f.severity === 'bad');
@@ -155,7 +196,7 @@ export function diagnose(report) {
 }
 
 // Shared rule with python/: unlocking only runs when the last read shows a lock cause
-// (any of them), even though `locked` itself only reflects the failure code.
+// (any of them), even though a checksum mismatch or charger lock alone leaves `locked` false.
 export function unlockRefusal(report) {
   if (!report.msg) return 'a mensagem do BMS (lxt_msg) não foi lida. Leia a bateria de novo.';
   if (report.msg.lock_causes.length === 0) {

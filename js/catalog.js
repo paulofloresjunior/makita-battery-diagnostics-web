@@ -68,7 +68,7 @@ export const READ_TITLES_PT = Object.freeze({
 // these reads in one 0xD1 session (in this order, gap_ms before each read after the first) and
 // pays the wake-up once.
 // lxt_data_ext (112 bytes) doesn't fit next to them and goes as a regular command; the f0513
-// group is read only on F0513 chips or when lxt_msg didn't answer.
+// group is read only on F0513 or unknown chips, or when lxt_msg brought no ROM back.
 export const READ_PLAN = Object.freeze({
   session: Object.freeze([
     'lxt_msg', 'lxt_data', 'lxt_model',
@@ -109,6 +109,17 @@ export const CHECKSUMS = Object.freeze([
   { name: 'AUX1', first: 48, last: 61, stored_at: 63, primary: false },
 ]);
 
+// Message family 30 (msg[0]) leaves the failure code nybble out of CS2 (spec
+// message.cs2_without_failure_code); so does a stale CS2 on any other family.
+export const CS2_WITHOUT_CODE = Object.freeze({ FAMILY: 0x30, LAST: 39 });
+
+// lxt_msg ROM byte 3 -> chip (spec chip_from_rom). "< 100 = F0513" (synrais) sent the 65-67
+// packs of the OBI repo issues down the LXT path, where DC/D7 only answer FF.
+export const CHIP_ROM_BYTE3 = Object.freeze({ LXT: 0x64, F0513: Object.freeze([0x01, 0x02, 0x03]), LEGACY_MIN: 0x65 });
+export const CHIP_LABELS_PT = Object.freeze({
+  lxt: 'LXT', f0513: 'F0513 (antigo)', mc908: 'MC908 (antigo)', legacy: 'antigo (só a mensagem)', unknown: 'desconhecido',
+});
+
 export const NYBBLE = Object.freeze({
   CHARGER_LOCK: 34,
   FAILURE_CODE: 40,
@@ -136,7 +147,8 @@ export const TEMP_LABELS_PT = Object.freeze(['células?', 'placa/MOSFET?']);
 
 export const LOCK_CAUSES_PT = Object.freeze({
   failure_code: 'Código de falha diferente de 0 e de 5',
-  inverted_checksums: 'CS0, CS1 e CS2 gravados invertidos (trava do BMS)',
+  inverted_checksums: 'CS1 e CS2 gravados invertidos (trava do BMS; CS0 também, com código de falha F)',
+  stale_cs2: 'Código de falha gravado sem recalcular a CS2 (trava do BMS)',
   checksum_mismatch: 'Checksum não confere',
   charger_lock: 'Nybble 34 diferente de zero (carregadores recusam)',
 });
@@ -166,6 +178,16 @@ export const DIAGNOSIS = Object.freeze({
   spread_bad_v: 0.3,
   temp_plausible_c: Object.freeze([-20, 80]),
   temp_sensor_diverge_c: 10,
+  // Real packs read raw ~2430 (-30 °C) with the NTC open and ~3980 (125 °C) shorted.
+  ntc_open_c: -28,
+  ntc_short_c: 120,
+  // Pack measured after the output fuse/FET: far below the cells when that path is open.
+  pack_below_cells_ratio: 0.5,
+  cell_implausible_v: 4.5,
+  // F0513 "voltage" whose low byte is the CC command echoed back (0x00CC, 0x02CC...); only
+  // below 0x0400, since real cells end in CC too (3788 mV = 0x0ECC).
+  f0513_echo_low_byte: 0xcc,
+  f0513_echo_max_mv: 1023,
   // The prompt's 4-cell rule: cell 5 < 0.1 V while every other cell is above 1 V.
   four_cell_absent_v: 0.1,
   four_cell_others_v: 1.0,
