@@ -44,3 +44,13 @@ export function round(value, decimals) {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
 }
+
+export function concatBytes(parts) {
+  const joined = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+  let offset = 0;
+  for (const part of parts) {
+    joined.set(part, offset);
+    offset += part.length;
+  }
+  return joined;
+}

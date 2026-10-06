@@ -11,7 +11,7 @@ import { CXT_NO_COMMAND_PT, decodeCxtPayload } from './cxt-decode.js';
 import { readCxtAdc } from './cxt-reader.js';
 import { fromHex } from './bytes.js';
 import { formatNumber, formatVolts } from './format.js';
-import { LINE_PROBE_DATA, LINE_PROBE_RSP_LEN, runRequest } from './reader.js';
+import { LINE_PROBE_DATA, LINE_PROBE_RSP_LEN, lineFromProbePayload, runRequest } from './reader.js';
 import { decodeXgtRead } from './xgt-decode.js';
 import { xgtStepRequest, xgtSteps } from './xgt-reader.js';
 
@@ -101,6 +101,15 @@ export async function detectFamily(link, { calibration = null, onProbe = () => {
     if (probe.outcome === 'match') found = family;
   }
   return { family: found, probes };
+}
+
+// The LXT probe is the same 0xD0 line probe the LXT read starts with (spec read_plan "line"):
+// when it matched, its result is the dump's line and the read doesn't send it again.
+// undefined = no LXT match, so the reader probes the line itself.
+export function lineFromDetection(detection) {
+  const probe = detection?.probes.find((candidate) => candidate.family === 'lxt' && candidate.outcome === 'match');
+  if (!probe) return undefined;
+  return lineFromProbePayload(fromHex(probe.read.response)) ?? undefined;
 }
 
 // One sentence for the progress line and the strip when nothing matched.

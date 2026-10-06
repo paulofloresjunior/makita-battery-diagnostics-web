@@ -4,8 +4,8 @@
 // Request:  01 | len(data) | rsp_len | cmd | data...
 // Response: cmd | rsp_len | payload[rsp_len]
 
-import { fromHex, toHex } from './bytes.js';
-import { SERIAL, TESTMODE, findRead, READS } from './catalog.js';
+import { concatBytes, fromHex, toHex } from './bytes.js';
+import { MSG_OFFSET, READ_PLAN, SERIAL, TESTMODE, findRead, READS } from './catalog.js';
 
 const FRAME_START = 0x01;
 const FLAG_RESET = 0x01;
@@ -101,13 +101,7 @@ export function encodeSession(transactions) {
   if (transactions.length === 0) {
     throw new ProtocolError('session has 0 transactions; expected at least 1');
   }
-  const parts = transactions.map(encodeTransaction);
-  const data = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
-  let offset = 0;
-  for (const part of parts) {
-    data.set(part, offset);
-    offset += part.length;
-  }
+  const data = concatBytes(transactions.map(encodeTransaction));
   const rspLen = transactions.reduce((sum, tx) => sum + 1 + tx.readLen, 0);
   if (rspLen > SERIAL.max_payload) {
     throw new ProtocolError(`session reads ${rspLen} bytes incl. presence; expected at most ${SERIAL.max_payload}`);
@@ -145,6 +139,26 @@ export function testmodeTransactions() {
   );
   const exit = transaction(TESTMODE.exit, 1, { name: `${TESTMODE.prefix}exit`, delayMs: TESTMODE.gap_ms });
   return [enter, ...middle, exit];
+}
+
+// Bulk LXT session from spec read_plan, one group per catalog read. lxt_msg becomes two
+// transactions, [reset, 33, read the 8 ROM bytes] + [no reset, AA 00, read the message], the
+// same bus traffic as the firmware's 0x33 command; every other read is [reset, CC + data].
+export function bulkSessionGroups() {
+  return READ_PLAN.session.map((name, index) => {
+    const read = findRead(name);
+    const delayMs = index === 0 ? 0 : READ_PLAN.gap_ms;
+    if (read.cmd === '33') {
+      return {
+        name,
+        transactions: [
+          transaction(read.cmd, MSG_OFFSET, { name, delayMs }),
+          transaction(read.data, read.rsp_len - MSG_OFFSET, { name, reset: false }),
+        ],
+      };
+    }
+    return { name, transactions: [transaction(`${read.cmd} ${read.data}`, read.rsp_len, { name, delayMs })] };
+  });
 }
 
 // The name a read is decoded as: tm_lxt_msg and after_lxt_msg decode like lxt_msg.

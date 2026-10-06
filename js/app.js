@@ -9,7 +9,7 @@ import { CXT_ADC, CXT_CALIBRATION_MV, CXT_CHANNELS, CXT_NTC, CXT_STEP_NAME } fro
 import { buildCxtReport, CXT_NO_COMMAND_PT, dividerRatio, isCxtDump } from './cxt-decode.js';
 import { diagnoseCxt } from './cxt-diagnosis.js';
 import { readCxtBattery } from './cxt-reader.js';
-import { detectFamily, detectionSummaryPt, FAMILY_NAMES_PT } from './detect.js';
+import { detectFamily, detectionSummaryPt, FAMILY_NAMES_PT, lineFromDetection } from './detect.js';
 import { diffDumps, diffReads } from './diff.js';
 import { createDump, dumpFileName, parseDump, serializeDump, withCalibration } from './dump.js';
 import { formatDate, formatNumber, formatVolts } from './format.js';
@@ -828,8 +828,13 @@ async function detectForRead() {
 async function readPack() {
   let family = state.family;
   let detection = null;
+  // Detection + read, not the XGT wiring dialog in between: the note measures the bridge.
+  const commandsBefore = state.link.commandCount;
+  let busyMs = 0;
   if (family === 'auto') {
+    const detectStart = performance.now();
     detection = await detectForRead();
+    busyMs += performance.now() - detectStart;
     if (!detection) return;
     family = detection.family;
     setProgress(`${detectionSummaryPt(detection)} Lendo…`);
@@ -839,12 +844,19 @@ async function readPack() {
     setProgress(detection ? 'XGT detectada; leitura completa cancelada.' : 'Leitura XGT cancelada. Nada foi enviado à bateria.');
     return;
   }
-  const progress = ({ done, total, name }) => {
+  const progress = ({ done, total, name, label_pt: labelPt }) => {
+    if (labelPt) {
+      setProgress(labelPt);
+      return;
+    }
     setProgress(name ? `Lendo ${done + 1} de ${total}: ${readTitle(name)}…` : 'Leitura concluída.');
   };
+  // The LXT probe of Automático already sent the read's 0xD0: reuse it (spec read_plan "line").
+  const readerOptions = family === 'lxt' ? { line: lineFromDetection(detection) } : undefined;
+  const readStart = performance.now();
   let result;
   try {
-    result = await READERS[family](state.link, progress);
+    result = await READERS[family](state.link, progress, readerOptions);
   } catch (error) {
     if (!(error instanceof XgtBridgeError)) throw error;
     throw new Error(`o Arduino não completou a primeira leitura XGT (${error.message}). Confira se o firmware gravado tem o comando 0xE0 (versão atual da pasta firmware/) e se a porta é a do Arduino.`);
@@ -856,8 +868,17 @@ async function readPack() {
   state.unlock = null;
   const entry = addDump(dump, true);
   entry.detection = detection;
-  setProgress(readSummary(family, result.reads));
+  busyMs += performance.now() - readStart;
+  const stats = readStatsPt(busyMs, state.link.commandCount - commandsBefore, result.mode);
+  setProgress(`${readSummary(family, result.reads)} ${stats}`);
   renderAll();
+}
+
+// "Leitura em 2,1 s, 5 comandos.": only on screen, never in the dump.
+function readStatsPt(elapsedMs, commands, mode) {
+  const count = `${commands} ${commands === 1 ? 'comando' : 'comandos'}`;
+  const fallback = mode === 'per_command' ? ' (firmware sem sessão 0xD1: comando a comando)' : '';
+  return `Leitura em ${formatNumber(elapsedMs / 1000, 1)} s, ${count}${fallback}.`;
 }
 
 function readSummary(family, reads) {

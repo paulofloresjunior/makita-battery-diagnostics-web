@@ -106,6 +106,8 @@ export class ObiLink {
     // One frame at a time: the firmware has no request ids, so overlapping requests would
     // read each other's answers.
     this.queue = Promise.resolve();
+    // Frames written so far; the UI shows how many a read took (each costs the 400 ms wake-up).
+    this.commandCount = 0;
   }
 
   request(cmd, data, rspLen, timeoutMs = this.timeoutMs) {
@@ -119,6 +121,7 @@ export class ObiLink {
     const frame = buildFrame(cmd, data, rspLen);
     this.transport.discardInput();
     await this.transport.write(frame);
+    this.commandCount += 1;
     const header = await this.transport.readExact(2, timeoutMs);
     if (header.length < 2) {
       throw new ProtocolError(`no response to cmd ${formatCmd(cmd)} within ${timeoutMs} ms (got ${header.length} of 2 header bytes)`);

@@ -23,6 +23,12 @@ const LXT_DATA_EXTENDED = 0x69;
 // the protocol by "byte 3 < 100 -> F0513".
 const F0513_ROM_BYTE3_LIMIT = 100;
 
+// 'lxt' or 'f0513' from the 8 ROM bytes; null when there is no ROM (short, or a blank FF/00 line).
+export function chipFromRom(rom) {
+  if (rom.length < MSG_OFFSET || blankKind(rom.slice(0, MSG_OFFSET))) return null;
+  return rom[3] < F0513_ROM_BYTE3_LIMIT ? 'f0513' : 'lxt';
+}
+
 function silentOrNull(payload) {
   const kind = blankKind(payload);
   return kind ? { status: 'silent', blank: kind } : null;

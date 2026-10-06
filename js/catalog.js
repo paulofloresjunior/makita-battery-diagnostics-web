@@ -64,6 +64,24 @@ export const READ_TITLES_PT = Object.freeze({
   lxt_data_ext: 'Bloco de dados estendido',
 });
 
+// spec read_plan: every regular command raises ENABLE and waits 400 ms, so the LXT read groups
+// these reads in one 0xD1 session (in this order, gap_ms before each read after the first) and
+// pays the wake-up once.
+// lxt_data_ext (112 bytes) doesn't fit next to them and goes as a regular command; the f0513
+// group is read only on F0513 chips or when lxt_msg didn't answer.
+export const READ_PLAN = Object.freeze({
+  session: Object.freeze([
+    'lxt_msg', 'lxt_data', 'lxt_model',
+    'type0_id', 'type3_id', 'd4_assembly_date', 'd4_0150', 'd4_od_events', 'd4_overload', 'd7_charge_level', 'd7_current',
+  ]),
+  // Pause before each read after the first: a read that takes fewer bytes than the BMS sends
+  // leaves it busy, and on a real BL1840B the next read came back as garbage without it.
+  gap_ms: 20,
+  after_session: Object.freeze(['lxt_data_ext']),
+  f0513_group: 'f0513',
+  session_payload_len: 142,
+});
+
 export const TESTMODE = Object.freeze({
   enter: 'CC D9 96 A5',
   exit: 'CC D9 FF FF',
