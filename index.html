@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Diagnóstico de baterias Makita</title>
+  <meta name="description" content="Lê, diagnostica e desbloqueia baterias Makita LXT (1-Wire), lê baterias XGT (40V) e CXT (12V) e detecta a linha sozinho, por uma interface Arduino USB.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='9' y='3' width='14' height='26' rx='3' fill='%23007A73'/%3E%3Crect x='13' y='1' width='6' height='3' rx='1' fill='%23007A73'/%3E%3Crect x='12' y='15' width='8' height='11' rx='1' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/app.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Pular para o conteúdo</a>
+
+  <header class="masthead">
+    <div class="masthead__title">
+      <h1>Diagnóstico de baterias Makita</h1>
+      <p class="masthead__sub" id="masthead-sub">Automático: detecta CXT, LXT ou XGT pela interface Arduino USB, 9600 baud</p>
+    </div>
+    <div class="link-status" id="link-status" data-state="off">
+      <span class="link-status__lamp" aria-hidden="true"></span>
+      <span id="link-status-text">Desconectado</span>
+    </div>
+    <button type="button" class="btn btn--primary" id="btn-connect">Conectar</button>
+  </header>
+
+  <div class="notice notice--warn" id="serial-unsupported" hidden>
+    <p><strong>Este navegador não tem Web Serial.</strong> Para ler baterias, use Chrome ou Edge no
+      computador (não funciona no celular nem no Firefox/Safari), com a página aberta em
+      <code>http://localhost</code> ou <code>https://</code>. Você ainda pode abrir e comparar dumps salvos.</p>
+  </div>
+
+  <nav class="toolbar" aria-label="Ações">
+    <fieldset class="family">
+      <legend class="family__legend">Linha da bateria</legend>
+      <label class="family__opt"><input type="radio" name="family" value="auto" checked><span>Automático</span></label>
+      <label class="family__opt"><input type="radio" name="family" value="lxt"><span>LXT (18V/14,4V)</span></label>
+      <label class="family__opt"><input type="radio" name="family" value="xgt"><span>XGT (40V)</span></label>
+      <label class="family__opt"><input type="radio" name="family" value="cxt"><span>CXT (12V)</span></label>
+    </fieldset>
+    <div class="toolbar__group" role="group" aria-label="Bateria">
+      <button type="button" class="btn" id="btn-read" disabled>Ler bateria</button>
+      <button type="button" class="btn" id="btn-testmode" disabled>Ler no modo de teste…</button>
+      <button type="button" class="btn btn--danger" id="btn-unlock" disabled>Desbloquear (limpar erros)…</button>
+      <span class="readonly-note" id="readonly-note" hidden></span>
+    </div>
+    <div class="toolbar__group" role="group" aria-label="Arquivos">
+      <label class="field-inline" for="dump-label">
+        <span>Nome</span>
+        <input type="text" id="dump-label" value="bateria" maxlength="60" autocomplete="off" spellcheck="false">
+      </label>
+      <button type="button" class="btn" id="btn-save" disabled>Salvar dump</button>
+      <button type="button" class="btn" id="btn-open">Abrir dumps…</button>
+      <input type="file" id="file-open" accept=".json,application/json" multiple hidden>
+    </div>
+  </nav>
+
+  <p class="progress" id="progress" role="status" aria-live="polite"></p>
+
+  <div class="tabs" role="tablist" aria-label="Visualização">
+    <button type="button" role="tab" id="tab-pack" aria-controls="panel-pack" aria-selected="true">Bateria</button>
+    <button type="button" role="tab" id="tab-compare" aria-controls="panel-compare" aria-selected="false" tabindex="-1">Comparar dumps</button>
+  </div>
+
+  <main id="main">
+    <section id="panel-pack" role="tabpanel" aria-labelledby="tab-pack">
+      <div id="pack-view"></div>
+    </section>
+    <section id="panel-compare" role="tabpanel" aria-labelledby="tab-compare" hidden>
+      <div class="compare-pickers">
+        <label for="compare-a">Antes (A)
+          <select id="compare-a"></select>
+        </label>
+        <label for="compare-b">Depois (B)
+          <select id="compare-b"></select>
+        </label>
+      </div>
+      <div id="compare-view"></div>
+    </section>
+  </main>
+
+  <dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+    <div class="dialog">
+      <h2 id="confirm-title"></h2>
+      <div id="confirm-body" class="dialog__body"></div>
+      <label class="dialog__ack" id="confirm-ack-wrap" hidden>
+        <input type="checkbox" id="confirm-ack"> <span id="confirm-ack-text"></span>
+      </label>
+      <div class="dialog__actions">
+        <button type="button" class="btn" id="confirm-cancel">Cancelar</button>
+        <button type="button" class="btn btn--primary" id="confirm-ok"></button>
+      </div>
+    </div>
+  </dialog>
+
+  <footer class="colophon">
+    <p>Software livre (MIT). Sem relação com a Makita. Desbloquear (só LXT) altera o estado do BMS: use por sua conta e risco. Os suportes XGT e CXT são experimentais e só leem.</p>
+  </footer>
+</body>
+</html>
