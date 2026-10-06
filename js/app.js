@@ -29,6 +29,9 @@ const CELL_FULL_V = 4.2;
 const SEVERITY_PT = { ok: 'Sem problemas', info: 'Observação', warn: 'Atenção', bad: 'Problema' };
 const CELL_STATE_PT = { ok: 'ok', low: 'baixa', deep: 'descarga profunda', dead: 'morta', open: 'fio aberto', absent: 'não existe' };
 
+// The page always opens on LXT, the line most users have; the choice is not remembered on purpose.
+const DEFAULT_FAMILY = 'lxt';
+
 const state = {
   transport: null,
   link: null,
@@ -40,14 +43,13 @@ const state = {
   unlock: null, // {before, steps, after} from the last unlock in this session
   nextId: 1,
   // 'auto' | 'lxt' | 'xgt' | 'cxt': what "Ler bateria" reads and which welcome is shown
-  family: 'auto',
+  family: DEFAULT_FAMILY,
   xgtWiringAcked: false, // XGT safety checklist confirmed for the current connection
   detectionMiss: null, // last detection that found no pack (shown above the welcome)
   calibrationMv: null, // Vcc measured at the Nano 5V pin, remembered per browser for CXT reads
 };
 
 const FAMILIES = ['auto', 'lxt', 'xgt', 'cxt'];
-const FAMILY_STORAGE_KEY = 'mbd.family';
 const CALIBRATION_STORAGE_KEY = 'mbd.cxt.vcc_mv';
 const FAMILY_SUBTITLE_PT = {
   auto: 'Automático: detecta CXT, LXT ou XGT pela interface Arduino USB, 9600 baud',
@@ -978,14 +980,9 @@ function confidenceTag(level) {
 }
 
 function setFamily(family, { keepCurrent = false } = {}) {
-  state.family = FAMILIES.includes(family) ? family : 'auto';
+  state.family = FAMILIES.includes(family) ? family : DEFAULT_FAMILY;
   for (const input of document.querySelectorAll('input[name="family"]')) input.checked = input.value === state.family;
   $('masthead-sub').textContent = FAMILY_SUBTITLE_PT[state.family];
-  try {
-    localStorage.setItem(FAMILY_STORAGE_KEY, state.family);
-  } catch {
-    // Storage blocked (private window, file policy): the choice just isn't remembered.
-  }
   if (keepCurrent) return;
   // Show the latest dump of the chosen line (any line in Automático), or that line's welcome.
   const latest = state.dumps.filter((entry) => state.family === 'auto' || dumpFamily(entry.dump) === state.family).at(-1);
@@ -995,13 +992,7 @@ function setFamily(family, { keepCurrent = false } = {}) {
 }
 
 function setupFamily() {
-  let saved = 'auto';
-  try {
-    saved = localStorage.getItem(FAMILY_STORAGE_KEY) ?? 'auto';
-  } catch {
-    // See setFamily.
-  }
-  setFamily(saved);
+  setFamily(DEFAULT_FAMILY);
   for (const input of document.querySelectorAll('input[name="family"]')) {
     input.addEventListener('change', () => {
       if (!input.checked) return;

@@ -16,7 +16,7 @@
   <header class="masthead">
     <div class="masthead__title">
       <h1>Diagnóstico de baterias Makita</h1>
-      <p class="masthead__sub" id="masthead-sub">Automático: detecta CXT, LXT ou XGT pela interface Arduino USB, 9600 baud</p>
+      <p class="masthead__sub" id="masthead-sub">LXT: interface Arduino USB ↔ 1-Wire, 9600 baud</p>
     </div>
     <div class="link-status" id="link-status" data-state="off">
       <span class="link-status__lamp" aria-hidden="true"></span>
@@ -34,8 +34,8 @@
   <nav class="toolbar" aria-label="Ações">
     <fieldset class="family">
       <legend class="family__legend">Linha da bateria</legend>
-      <label class="family__opt"><input type="radio" name="family" value="auto" checked><span>Automático</span></label>
-      <label class="family__opt"><input type="radio" name="family" value="lxt"><span>LXT (18V/14,4V)</span></label>
+      <label class="family__opt"><input type="radio" name="family" value="auto"><span>Automático</span></label>
+      <label class="family__opt"><input type="radio" name="family" value="lxt" checked><span>LXT (18V/14,4V)</span></label>
       <label class="family__opt"><input type="radio" name="family" value="xgt"><span>XGT (40V)</span></label>
       <label class="family__opt"><input type="radio" name="family" value="cxt"><span>CXT (12V)</span></label>
     </fieldset>
