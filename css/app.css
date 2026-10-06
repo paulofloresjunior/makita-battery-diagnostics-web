@@ -1,6 +1,17 @@
-/* Bench-instrument look: cool grey paper, one teal accent, DIN-style system type
-   (Bahnschrift on Windows) and tabular figures for every reading. No web fonts, so the
-   page works offline. */
+/* Bench-instrument look: cool grey paper, one teal accent and tabular figures for every
+   reading. Type is Archivo (variable weight AND width), bundled in fonts/ so the page looks the
+   same on every OS and still works offline: one family, with hierarchy from width — the pack
+   model is set condensed and heavy like the label on a Makita battery, body text at normal width.
+   Subset to Latin-1 plus the symbols the app uses (82 KB); OFL licence in fonts/. */
+
+@font-face {
+  font-family: "Archivo";
+  src: url("../fonts/archivo-var.woff2") format("woff2");
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-style: normal;
+  font-display: swap;
+}
 
 :root {
   --paper: #e8eceb;
@@ -21,14 +32,18 @@
   --cell-empty: #dfe5e3;
   --focus: #0059b8;
 
-  --font-ui: "Bahnschrift", "DIN Alternate", "DIN 2014", "Barlow", "Roboto Condensed", "Segoe UI", system-ui, sans-serif;
+  --font-ui: "Archivo", "Bahnschrift", "Segoe UI", system-ui, sans-serif;
   --font-hex: "Cascadia Mono", "SF Mono", Consolas, "Liberation Mono", ui-monospace, monospace;
 
   --step--1: 0.8125rem;
   --step-0: 1rem;
   --step-1: 1.25rem;
   --step-2: 1.5625rem;
-  --step-3: 2.4rem;
+  --step-3: 2.75rem;
+
+  /* widths of the Archivo wdth axis */
+  --wdth-display: 68%;
+  --wdth-title: 87.5%;
 
   --radius-plate: 10px;
   --radius-ctl: 6px;
@@ -68,11 +83,13 @@ body {
   color: var(--ink);
   font-family: var(--font-ui);
   font-size: var(--step-0);
-  line-height: 1.45;
+  line-height: 1.5;
   font-variant-numeric: tabular-nums;
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
 }
 
-h1, h2, h3 { line-height: 1.15; margin: 0; font-weight: 600; }
+h1, h2, h3 { line-height: 1.15; margin: 0; font-weight: 650; font-stretch: var(--wdth-title); }
 h2 { font-size: var(--step-1); }
 h3 { font-size: var(--step-0); }
 p { margin: 0; }
@@ -95,7 +112,7 @@ code, .hex { font-family: var(--font-hex); font-size: 0.9em; }
   background: var(--panel);
 }
 .masthead__title { margin-right: auto; }
-.masthead h1 { font-size: var(--step-2); font-stretch: 87.5%; letter-spacing: -0.01em; }
+.masthead h1 { font-size: var(--step-2); font-weight: 700; letter-spacing: -0.005em; }
 .masthead__sub { color: var(--muted); font-size: var(--step--1); }
 
 .link-status { display: inline-flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: var(--step--1); }
@@ -193,7 +210,7 @@ main { padding: 1.25rem clamp(1rem, 3vw, 2rem) 2rem; }
   display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.25rem 1rem;
   padding-bottom: 0.8rem; margin-bottom: 0.9rem; border-bottom: 2px solid var(--ink);
 }
-.plate__model { font-size: var(--step-3); font-weight: 700; font-stretch: 87.5%; letter-spacing: -0.02em; line-height: 1; }
+.plate__model { font-size: var(--step-3); font-weight: 820; font-stretch: var(--wdth-display); letter-spacing: 0.005em; line-height: 0.95; }
 .plate__rating { font-size: var(--step-1); font-weight: 600; color: var(--teal); }
 .plate__lock {
   margin-left: auto; align-self: center;
@@ -227,7 +244,7 @@ main { padding: 1.25rem clamp(1rem, 3vw, 2rem) 2rem; }
 .cell[data-state="dead"] .cell__fill { background: var(--bad); }
 .cell[data-state="open"] .cell__can { border-style: dashed; border-color: var(--bad); }
 .cell[data-state="absent"] .cell__can { border-style: dotted; opacity: 0.45; }
-.cell__v { font-weight: 700; font-size: var(--step-0); }
+.cell__v { font-weight: 700; font-size: var(--step-0); font-stretch: var(--wdth-title); }
 .cell__name { color: var(--muted); font-size: var(--step--1); }
 .cell__flag { font-size: var(--step--1); font-weight: 600; text-align: center; min-height: 1.2em; }
 .cell[data-state="ok"] .cell__flag { color: var(--muted); font-weight: 400; }
@@ -237,14 +254,14 @@ main { padding: 1.25rem clamp(1rem, 3vw, 2rem) 2rem; }
 .cells-summary { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--rule); }
 .readout { display: flex; flex-direction: column; }
 .readout__label { color: var(--muted); font-size: var(--step--1); }
-.readout__value { font-size: var(--step-2); font-weight: 600; line-height: 1.1; }
+.readout__value { font-size: var(--step-2); font-weight: 620; font-stretch: var(--wdth-title); line-height: 1.1; }
 .readout__value small { font-size: var(--step-0); font-weight: 400; color: var(--muted); }
 
 .readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: 1rem; }
 
 /* ---- diagnosis ------------------------------------------------------------------- */
 
-.verdict { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.9rem; font-size: var(--step-1); font-weight: 700; }
+.verdict { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.9rem; font-size: var(--step-1); font-weight: 700; font-stretch: var(--wdth-title); }
 .sev-dot { width: 0.9rem; height: 0.9rem; border-radius: 50%; flex: none; background: var(--muted); }
 [data-sev="ok"] .sev-dot, .sev-dot[data-sev="ok"] { background: var(--ok); }
 [data-sev="info"] .sev-dot, .sev-dot[data-sev="info"] { background: var(--info); }
